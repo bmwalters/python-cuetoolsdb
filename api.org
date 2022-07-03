@@ -1,0 +1,280 @@
+#+TITLE: CUETools Database API Documentation
+#+SETUPFILE: https://raw.githubusercontent.com/fniessen/org-html-themes/master/org/theme-readtheorg.setup
+#+html_head: <style>pre.src { max-height: 500px; overflow-y: auto; }</style>
+
+# https://joseph8th.github.io/posts/wow-writing-literate-api-documentation-in-emacs-org-mode/
+# http://cue.tools/wiki/CUETools_log
+# https://emacsconf.org/2021/talks/tech/
+
+* Init :noexport:
+#+name: api-url
+: https://db.cue.tools
+
+* Introduction
+You probably heard about AccurateRip, a wonderful database of CD rip checksums, which helps you make sure your CD rip is an exact copy of original CD. What it can tell you is how many other people got the same data when copying this CD. [[http://cue.tools/wiki/CUETools_Database][CUETools Database]] (CTDB) is an extension of this idea.
+
+* Lookup
+:PROPERTIES:
+:CUSTOM_ID: lookup
+:END:
+The ~/lookup2.php~ endpoint allows querying the CTDB and/or various CD metadata providers given an encoded CD TOC.
+
+** Query Parameters
+# https://github.com/gchudov/db.cue.tools/blob/2055293240/utils/docker/ctdbweb/db.cue.tools/lookup2.php
+*** version
+example: ~?version=3~
+
+Required: API compatibility version. Version 3 is described here.
+*** toc
+example: ~?toc=0:16032:32072:47282:62810~
+
+The example corresponds to [[https://musicbrainz.org/release/dcecfb29-f17b-4288-b629-49ae6fac49a2][this release]].
+
+# https://github.com/gchudov/cuetools.net/blob/c79681501e/CUETools.CDImage/CDImage.cs#L515=
+Required: CD Table of Contents (TOC) fingerprint. Contains a colon-separated list of track start times in sectors followed by the length of the disc in sectors. If a track is not an audio track, its start time must be prefixed with ~-~. As of writing any non-audio tracks [[https://github.com/gchudov/db.cue.tools/blob/20552932406c711054967a5ba3f43290b0caf141/utils/docker/ctdbweb/db.cue.tools/phpctdb/ctdb.php#L224-L225][may only appear]] at the beginning or end of the track list.
+*** ctdb
+example: ~?ctdb=0~
+
+If specified, controls whether or not CTDB is queried. This is enabled by default.
+*** fuzzy
+example: ~?fuzzy=1~
+
+If fuzzy mode is enabled, the CTDB query will not require exact track offsets to match the ~toc~ parameter. Instead, only audio track offsets and the length of the audio section of the CD will be taken into account.
+*** metadata
+example: ~?metadata=fast~
+
+If specified, controls if and how the API will look up CD metadata from various providers.
+This is disabled by default. The search level specifies how many providers are queried.
+
+Values: ~fast~, ~default~, ~extensive~
+*** type
+example: ~?type=xml~
+
+Optionally specify the response format for **metadata entries**. This option does not apply to CTDB entries; if ~?type=json~ is specified and ~metadata~ is not, the returned value will be ~null~.
+The default is xml.
+
+Values: ~xml~, ~json~
+*** jsonp
+example: ~?jsonp=1~
+
+If specified, returns metadata responses in [[https://en.wikipedia.org/wiki/JSONP][JSONP]] format. The same caveats apply as with ~type~. This is disabled by default.
+*** Individual Metadata Providers
+example: ~?discogs=1~
+
+Individual metadata providers may be toggled using parameters of the form ~?<provider>=<0/1>~.
+
+Valid provider names: ~musicbrainz~, ~musicbrainzfuzzy~, ~musicbrainzraw~, ~freedb~, ~freedbfuzzy~, ~discogs~, ~discogsfuzzy~
+
+** XML Response Format
+The API returns an XML document when data has been retrieved and query parameters do not request a JSON response. The XML response is also the only format that includes CTDB entries as well as metadata results.
+
+The top-level element of the XML document is ~<ctdb>~. It has no relevant attributes. Nested within the ~<ctdb>~ element are ~<entry>~ elements for CTDB entries and ~<metadata>~ elements for metadata results.
+
+# https://github.com/gchudov/db.cue.tools/blob/2055293240/utils/docker/ctdbweb/db.cue.tools/lookup2.php#L180=
+
+*** ~<entry>~ elements
+Each entry is a user-submitted description of CD data. Descriptions submitted by multiple unique users have a higher ~confidence~ score. Information from the entry can be used to determine if a local copy of CD data matches submissions from other users (using the CRCs). If local data does not match, it may be possible to use parity data to reconstruct the data and force a match.
+
+For more details on using the CRCs see the Track and Disc CRCs section. Refer to the Parity section for more info on the parity system.
+
+**** Attributes
+***** id
+***** crc32
+***** confidence
+TODO
+***** npar
+***** stride
+***** hasparity
+Optional. Present when parity information has been submitted for this entry.
+
+The attribute value is either an absolute URL or a path relative to the API domain. This URL can be used to retrive the parity data for this entry.
+
+See the Parity section for details on using this parity data.
+***** parity
+***** syndrome
+***** trackcrcs
+A space-separated list of CRC-32
+***** toc
+TOC string of the submission as described in the Query Parameters section.
+**** Children
+An ~<entry>~ element has no children.
+
+*** ~<metadata>~ elements
+**** Attributes
+***** source
+***** id
+***** artist
+***** album
+***** year
+***** discnumber
+***** disccount
+***** discname
+***** infourl
+***** barcode
+***** discogs_id
+***** group_id
+***** genre
+***** relevance
+**** Children
+All child elements are optional. TODO.
+***** ~<extra>~ element
+Optional, up to 1. Contains textual extra information.
+***** ~<track>~ elements
+Track elements are listed in disc order.
+Attributes: ~name~, ~artist~
+***** ~<label>~ elements
+Optional, up to 1. Attributes: ~name~, ~catno~
+***** ~<release>~ elements
+Optional, up to 1. Attributes: ~country~, ~date~
+***** ~<coverart>~ elements
+Optional, up to 1.
+****** ~uri~ attribute
+****** ~uri150~ attribute
+****** ~width~ attribute
+****** ~height~ attribute
+****** ~primary~ attribute
+
+** JSON Response Format
+TODO
+
+** Example: Minimal request.
+#+name: lookup2-found
+#+begin_src restclient :var api=api-url :exports both
+GET :api/lookup2.php?version=3&toc=0:16032:32072:47282:62810
+#+end_src
+
+#+RESULTS: lookup2-found
+#+BEGIN_SRC nxml
+<ctdb xmlns="http://db.cuetools.net/ns/mmd-1.0#" xmlns:ext="http://db.cuetools.net/ns/ext-1.0#">
+  <entry confidence="8" crc32="5457b143" hasparity="http://p.cuetools.net/3117474" id="3117474" npar="8" stride="5880" syndrome="tSkrv39Oah9FufT3Z+uMHQ==" toc="0:16032:32072:47282:62810" trackcrcs="97217ee6 dc8a2af2 338369b1 2eac339c" />
+</ctdb>
+<!-- GET https://db.cue.tools/lookup2.php?version=3&toc=0:16032:32072:47282:62810 -->
+<!-- HTTP/1.1 200 OK -->
+<!-- Date: Sun, 29 May 2022 21:31:16 GMT -->
+<!-- Server: Apache/2.4.38 (Debian) -->
+<!-- X-Powered-By: PHP/7.2.34 -->
+<!-- Cache-Control: max-age=10 -->
+<!-- ETag: 82b23b0d3ded799b55dffd1a8dc3dbf2 -->
+<!-- Vary: Accept-Encoding -->
+<!-- Content-Length: 254 -->
+<!-- Content-Type: text/xml; charset=UTF-8 -->
+<!-- Keep-Alive: timeout=5, max=100 -->
+<!-- Connection: Keep-Alive -->
+<!-- Request duration: 0.497012s -->
+#+END_SRC
+
+** Submit
+TODO
+
+*** Request Body
+The request body for this endpoint must be HTTP form data.
+
+**** confirmid
+If provided, will confirm an existing entry by ID.
+**** toc
+Required.
+**** parity
+Required.
+**** syndrome
+**** crc32
+**** trackcrcs
+**** quality
+**** maxid
+**** parityfile
+This is an HTTP form file upload. A submission with ~parityfile~ will be rejected if it is confirming an existing entry that already has parity.
+**** userid
+**** drivename
+**** barcode
+**** artist
+**** title
+*** Request Headers
+**** User-Agent
+** Stats
+statsjson.php
+** Others
+repair.php
+
+TODO:
+    http://db.cuetools.net/?tocid=
+    http://db.cuetools.net/top.php?tocid=
+    http://db.cuetools.net/?artist=
+    http://db.cuetools.net/top.php?artist=
+using top.php sorts by most entries, without top.php sort is by most recent
+** Track and CD CRCs
+The data on an audio disc consists of three consecutive sections: lead-in (containing the TOC), program area, and lead-out.
+
+The program area is divided into tracks. Tracks themselves can have multiple indices; index 1 is always present but there is often a "pregap" in index 0.
+
+Even if the data is the same across discs, different pressings of the same release may slightly shift the absolute position of said data on the disc. The magnitude of this shift is referred to as a pressing offset.
+
+A simple enhancement is used to account for small pressing offsets: the first 10 frames (TODO bytes) of the first track and the last 10 frames of the last track are not included in the CRC calculation. TODO: Verify that pressing offsets are the reason for these skipped frames.
+
+TODO: "The entire rip CRC32 is actually excluding the pre-gap (data before the first track), the first 10 sectors (5880 samples, similar to AccurateRip), and last 10 to 19.999 sectors (depending on disc length - total length of data covered by CRC32 has to be multiple of 10 sectors).
+Track CRC for the first track excludes the first 10 sectors, and track CRC for the last track excludes 10 to 19.999 sectors. Track CRC for intermediate tracks covers the whole track."
+
+Additionally, the whole-disc CRC calculation does not include the pregap of track 1. TODO: Confirm if this applies to single-track CRCs and pregaps of other tracks. TODO: Confirm if this is still up-to-date.
+
+A more complex algorithm is used to match audio data with large pressing offsets. Instead of computing a single CRC for a track, multiple candidate offsets are identified and the CRC value is recalculated with these hypothetical offsets applied (using simple operations; not resumming all track data). Then these CRCs from hypothetical offsets can be compared to the CTDB results. TODO: Describe this better.
+
+TODO: Describe how the mechanisms here differ from AccurateRip (V2). @gchudov states that accounting for pressing offsets is "something that AccurateRip V2 doesn't support", however @spoon [[https://forum.dbpoweramp.com/showthread.php?27550][states]] that "[a]n offset check is done on all the possible offsets". [[https://wiki.hydrogenaud.io/index.php?title=AccurateRip#Pressings][HA wiki]]: "A major update to the program CUETools offered a mathematical solution to quickly cross-check a rip against multiple pressings. AccurateRip v2 would later be released to incorporate cross-checking against alternate pressings as well."
+
+If a track does not match any CTDB entries for a given TOC, it may be possible to "correct" (replace) parts of the track data to match a database entry using parity data. Refer to the Parity section for details. TODO: Note that this is at disc-level not track-level.
+
+* Notes from hydrogenaudio forum thread
+subscribe to: https://hydrogenaud.io/index.php/topic,79882.325.html
+    read up to 2022/03
+
+rationale for 10 frames: https://hydrogenaud.io/index.php/topic,79882.msg704627.html#msg704627
+rationale for allowing cuetools submissions (originally): https://hydrogenaud.io/index.php/topic,79882.msg707111.html#msg707111
+"what if same toc but different audio" (last paragraph): https://hydrogenaud.io/index.php/topic,79882.msg739129.html#msg739129
+rationale for whole-disc parity: https://hydrogenaud.io/index.php/topic,79882.msg753149.html#msg753149
+summary of error messages: https://hydrogenaud.io/index.php/topic,79882.msg753150.html#msg753150
+
+ways different pressings can be offset at the factory: https://github.com/gchudov/cuetools.net/issues/47#issuecomment-606953553
+
+c2 error info (see link): https://github.com/gchudov/cuetools.net/issues/192
+
+> My guess is that you are getting a comparison against another pressing that has a large offset from your pressing. The large offset difference means that some tracks may be able to be verified but others will not. If the offset difference is too big then the math doesn't work out for the comparison and AccurateRip can't verify. The pressing you have might be right on the boundary limits of how large of an offset difference that AccurateRip can handle. - [[https://forums.stevehoffman.tv/threads/making-a-mess-of-accuraterip.311323/][hoff]]
+
+> [AccurateRip's] Offset 0 is the one you have ripped, your own discs will always be offset 0. - [[https://forum.dbpoweramp.com/showthread.php?47834-Determining-audio-CD-pressing-offset&p=208612&viewfull=1#post208612][spoon]]
+
+accuraterip confidence >=2 is/was allowed for cuetools verify submissions in submit mode. interesting.
+    "Also, as the number of ripper submissions grows, i will disable CueTools submissions at a certain point."
+
+    [[https://hydrogenaud.io/index.php/topic,79882.msg771424.html#msg771424][2011]]:
+        In the near future, i plan to reset CTDB confidence levels to the actual number of independent submissions.
+        For now, i suggest to use CTDB as a source of repair material, not as verification of rip accuracy in itself.
+
+"CTDB or AR entries with confidence 1 are never secure" with reasons: https://hydrogenaud.io/index.php/topic,79882.msg869409.html#msg869409
+
+> (without the opportunity to have a look) Sometimes a submission has a pressing offset greater than 10 sectors (10×588 samples) from the original submission. The data is still the same but it is out-of-range. When this happens a new CTDBID is created. If you have a rip of a pressing that is within 5880 samples (10 sectors) of both records, you receive results from both. - [[https://hydrogenaud.io/index.php/topic,79882.msg962522.html#msg962522][korth]]
+
+This makes complete sense.
+
+TODO: Does it also try to shift the TOC and try multiple TOCIDs? No, it shouldn't, and it shouldn't need to. Note that lots of musicbrainz releases have multiple discids. It [[https://github.com/gchudov/cuetools.net/issues/47][could also go the other way]] (one discid to multiple releases.)
+    contemplate: https://db.cuetools.net/top.php?tocid=bExefIn6EIS2k7x6sH6JPE07n9o-
+
+AccurateRip algorithms:
+    official: https://forum.dbpoweramp.com/showthread.php?20641
+    clarification: https://hydrogenaud.io/index.php?PHPSESSID=5ani413lh6v8do6ke04b55a842&topic=97603.msg830037#msg830037
+    awesome blog: http://jonls.dk/2009/10/calculating-accuraterip-checksums/
+    https://github.com/tuffy/python-audio-tools/blob/master/audiotools/accuraterip.py
+
+https://wiki.musicbrainz.org/Disc_ID_Calculation
+
+CueTools verify requires cue file for pregap info: https://hydrogenaud.io/index.php/topic,120604.msg994091.html#msg994091
+* Parity
+The basic algorithm is Reed-Solomon code on 16-bit words. Unfortunately, 32-bit Reed-Solomon is extremely slow, and 16-bit Reed-Solomon can be used directly only on chunks of up to 64k words == 128kbytes. So i have to process the file as a matrix with rows of 10 sectors (5880 samples == 11760 words/columns). Such matrix has up to ~30000 rows for a 70 minute CD, so i can use 16-bit Reed-Solomon for each column independently. Using the same notation as in wikipedia it's a (65536,65528) code, which produces 8 words for each column. So the total size is 8*11760*16bit = 188160 bytes.
+
+N-word recovery record can detect and correct up to N/2 erroneous words, so this 8-word recovery record can detect up to 4 errors in each column. N cannot be much smaller, but it also cannot be much larger, because processing time grows proportionally to N, so N=8 was chosen as the highest value which is still "fast enough" - close to FLAC decoding speed.
+
+Row size doesn't have such impact on performance, so it can be easily extended in the future, so that popular CDs can have larger recovery records. Current size was chosen so that if database contained as many entries as AccurateRip, it would fit on a 1TB drive. I also took into account that making records larger only helps in best-case scenario when the damage is sequential (scratches etc). When damage occurs at random points, fixing it requires larger N, not larger row size, but this has a performance impact. So the current record size was chosen to be more or less balanced.
+
+[[https://hydrogenaud.io/index.php/topic,79882.msg697686.html#msg697686][source]]
+
+Parity is only on the entire-CD level, not on a per-track basis.
+* Confidence Score
+Discs don't have to pass AR before being added to the CTDB, AR is used only as a kind of proof that there is a physical CD with such content when adding with CUETools.
+CD Rippers can add CDs to CTDB even if AR doesn't know them. There is already a number of CDs in database submitted by CUERipper, some of them have confidence 1 - that means they didn't pass AR check or weren't found in AR.
+
+CTDB confidence comes from AR confidence + number of rips done using CUERipper. In this case AR confidence = 3, number of rips done using CUERipper = 0, so the total is 3.
